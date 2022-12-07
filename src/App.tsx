@@ -1,4 +1,4 @@
-import { Col, message, Row, Space } from 'antd'
+import { Col, Row, Space } from 'antd'
 import { DashboardOutlined, UsergroupAddOutlined, LineChartOutlined, FileTextOutlined, SettingOutlined } from '@ant-design/icons';
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import * as css from './App.styles';
