@@ -3,29 +3,13 @@ import { useNavigate } from 'react-router-dom';
 import { Avatar, Space, Input, Button, Radio, Table, Tag, message, Modal } from 'antd'
 import { UserOutlined, SearchOutlined, PlusOutlined, EditOutlined, DeleteOutlined, CheckCircleOutlined, CloseCircleOutlined, ExclamationCircleFilled } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import * as css from './App.styles';
-
-type EmployeeStatus = 'active' | 'inactive'
-type EmployeeStatusFilter = EmployeeStatus | 'all-status'
-
-type StatusMutationPayload = {
-  ids: string[]
-  status: EmployeeStatus
-}
-
-type StatusMutationResponse = {
-  success: boolean
-}
-
-interface Employee {
-  id: string;
-  name: string;
-  title: string;
-  organization: string;
-  status: EmployeeStatus;
-}
+import { Employee, EmployeeStatus, EmployeeStatusFilter } from './types';
+import useGetEmployees from './hooks/useGetEmployees';
+import filterByStatus from './functions/filterByStatus';
+import filterByName from './functions/filterByName';
+import SelectionBar from './components/SelectionBar';
 
 function EmployeeList() {
   const [activeFilter, setActiveFilter] = useState<EmployeeStatusFilter>('all-status');
@@ -33,29 +17,13 @@ function EmployeeList() {
   const [checkedEmployees, setCheckedEmployees] = useState<string[]>([]);
   const navigate = useNavigate();
 
-  const { isLoading, data } = useQuery({
-    queryKey: ['employees'],
-    queryFn: () => fetch('http://localhost:3000/employees').then(res => res.json()),
-    select: data => data as Employee[],
+  const { isLoading, data } = useGetEmployees({
     onError: () => {
       message.error('Uh oh, something is wrong! Check your internet connection and try again')
     },
   });
 
-  const dataSource = [];
-  for (let employee of (data || [])) {
-    if (activeFilter !== 'all-status' && employee.status !== activeFilter) {
-      continue;
-    }
-    if (searchText && !employee.name.toLowerCase().includes(searchText.toLowerCase())) {
-      continue;
-    }
-
-    dataSource.push({
-      key: employee.id,
-      ...employee,
-    });
-  };
+  const dataSource = filterByName(filterByStatus(data || [], activeFilter), searchText)
 
   const columns: ColumnsType<typeof dataSource[number]> = [
     {
@@ -97,45 +65,6 @@ function EmployeeList() {
       )
     },
   ];
-  
-  const queryClient = useQueryClient()
-  const { mutate: mutateStatus, isLoading: isMutatingStatus } = useMutation<StatusMutationResponse, unknown, StatusMutationPayload>({
-    mutationFn: payload => {
-      return fetch('http://localhost:3000/employees/status', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(payload)
-      }).then(res => res.json());
-    },
-    onSuccess: (data, payload) => {
-      if (data.success) {
-        message.success(`Successfully ${payload.status === 'active' ? 'activated' : 'deactivated'} ${checkedEmployees.length} employees`);
-        queryClient.invalidateQueries({ queryKey: ['employees'] })
-        return;
-      }
-      message.error('Uh oh, something is wrong! Check your internet connection and try again');
-    },
-    onError: () => {
-      message.error('Uh oh, something is wrong! Check your internet connection and try again');
-    },
-    retry: false,
-  })
-
-  const handleActivateBatch = () => {
-    mutateStatus({
-      ids: checkedEmployees,
-      status: 'active'
-    })
-  }
-
-  const handleDeactivateBatch = () => {
-    mutateStatus({
-      ids: checkedEmployees,
-      status: 'inactive'
-    })
-  }
 
   const handleDelete = (ids: string[]) => {
     Modal.confirm({
@@ -179,14 +108,10 @@ function EmployeeList() {
           <PlusOutlined /> Add New Employee
         </Button>
       </div>
-      {checkedEmployees.length > 0 && (
-        <Space size="middle" className={css.selectionBar}>
-          <b>{checkedEmployees.length} employees selected</b>
-          <Button onClick={() => handleDelete(checkedEmployees)} icon={<DeleteOutlined />}>Delete</Button>
-          <Button loading={isMutatingStatus} onClick={handleActivateBatch} icon={<CheckCircleOutlined />}>Activate</Button>
-          <Button loading={isMutatingStatus} onClick={handleDeactivateBatch} icon={<CloseCircleOutlined />}>Deactivate</Button>
-        </Space>
-      )}
+      <SelectionBar 
+        checkedEmployees={checkedEmployees}
+        onDelete={() => handleDelete(checkedEmployees)}
+      />
       <Table
         loading={isLoading}
         rowSelection={{
