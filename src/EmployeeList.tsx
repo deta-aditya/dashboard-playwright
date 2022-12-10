@@ -1,13 +1,23 @@
 import { Key, useState } from 'react';
-import { Link } from 'react-router-dom';
-import { Avatar, Space, Input, Button, Radio, Table, Tag, message } from 'antd'
-import { UserOutlined, SearchOutlined, PlusOutlined, EditOutlined, DeleteOutlined, CheckCircleOutlined, CloseCircleOutlined } from '@ant-design/icons';
+import { useNavigate } from 'react-router-dom';
+import { Avatar, Space, Input, Button, Radio, Table, Tag, message, Modal } from 'antd'
+import { UserOutlined, SearchOutlined, PlusOutlined, EditOutlined, DeleteOutlined, CheckCircleOutlined, CloseCircleOutlined, ExclamationCircleFilled } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+
 import * as css from './App.styles';
 
 type EmployeeStatus = 'active' | 'inactive'
 type EmployeeStatusFilter = EmployeeStatus | 'all-status'
+
+type StatusMutationPayload = {
+  ids: string[]
+  status: EmployeeStatus
+}
+
+type StatusMutationResponse = {
+  success: boolean
+}
 
 interface Employee {
   id: string;
@@ -20,10 +30,11 @@ interface Employee {
 function EmployeeList() {
   const [activeFilter, setActiveFilter] = useState<EmployeeStatusFilter>('all-status');
   const [searchText, setSearchText] = useState('');
-  const [checkedEmployees, setCheckedEmployees] = useState<Key[]>([]);
+  const [checkedEmployees, setCheckedEmployees] = useState<string[]>([]);
+  const navigate = useNavigate();
 
-  const { isLoading, data } = useQuery({ 
-    queryKey: ['employees'], 
+  const { isLoading, data } = useQuery({
+    queryKey: ['employees'],
     queryFn: () => fetch('http://localhost:3000/employees').then(res => res.json()),
     select: data => data as Employee[],
     onError: () => {
@@ -69,23 +80,76 @@ function EmployeeList() {
       render: (value: EmployeeStatus, record: Employee) => {
         switch (value) {
           case 'active':
-            return <Tag className={`status-${record.name.toLowerCase()}`} color="green">Active</Tag>
+            return <Tag className={`status-${record.name.toLowerCase()}`} color="green">Active</Tag>;
           case 'inactive':
-            return <Tag className={`status-${record.name.toLowerCase()}`} color="red">Inactive</Tag>
+            return <Tag className={`status-${record.name.toLowerCase()}`} color="red">Inactive</Tag>;
         }
       },
     },
     {
       title: 'Action',
       dataIndex: 'action',
-      render: () => (
+      render: (_, record: Employee) => (
         <Space>
-          <Button size="small" icon={<EditOutlined />}>Edit</Button>
-          <Button size="small" icon={<DeleteOutlined />}>Delete</Button>
+          <Button size="small" icon={<EditOutlined />} onClick={() => navigate(`/edit/${record.id}`)}>Edit</Button>
+          <Button size="small" icon={<DeleteOutlined />} onClick={() => handleDelete([record.id])}>Delete</Button>
         </Space>
       )
     },
   ];
+  
+  const queryClient = useQueryClient()
+  const { mutate: mutateStatus, isLoading: isMutatingStatus } = useMutation<StatusMutationResponse, unknown, StatusMutationPayload>({
+    mutationFn: payload => {
+      return fetch('http://localhost:3000/employees/status', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload)
+      }).then(res => res.json());
+    },
+    onSuccess: (data, payload) => {
+      if (data.success) {
+        message.success(`Successfully ${payload.status === 'active' ? 'activated' : 'deactivated'} ${checkedEmployees.length} employees`);
+        queryClient.invalidateQueries({ queryKey: ['employees'] })
+        return;
+      }
+      message.error('Uh oh, something is wrong! Check your internet connection and try again');
+    },
+    onError: () => {
+      message.error('Uh oh, something is wrong! Check your internet connection and try again');
+    },
+    retry: false,
+  })
+
+  const handleActivateBatch = () => {
+    mutateStatus({
+      ids: checkedEmployees,
+      status: 'active'
+    })
+  }
+
+  const handleDeactivateBatch = () => {
+    mutateStatus({
+      ids: checkedEmployees,
+      status: 'inactive'
+    })
+  }
+
+  const handleDelete = (ids: string[]) => {
+    Modal.confirm({
+      title: `Are you sure to delete ${ids.length} employees?`,
+      icon: <ExclamationCircleFilled />,
+      onOk: () => {
+        //
+      },
+    })
+  }
+
+  const handleCheckEmployees = (values: Key[]) => {
+    setCheckedEmployees(values.map(key => String(key)));
+  }
 
   return (
     <>
@@ -111,18 +175,16 @@ function EmployeeList() {
             <Radio.Button value="inactive">Inactive</Radio.Button>
           </Radio.Group>
         </Space>
-        <Link to="/create">
-          <Button type="primary">
-            <PlusOutlined /> Add New Employee
-          </Button>
-        </Link>
+        <Button type="primary" onClick={() => navigate('/create')}>
+          <PlusOutlined /> Add New Employee
+        </Button>
       </div>
       {checkedEmployees.length > 0 && (
         <Space size="middle" className={css.selectionBar}>
           <b>{checkedEmployees.length} employees selected</b>
-          <Button icon={<DeleteOutlined />}>Delete</Button>
-          <Button icon={<CheckCircleOutlined />}>Activate</Button>
-          <Button icon={<CloseCircleOutlined />}>Deactivate</Button>
+          <Button onClick={() => handleDelete(checkedEmployees)} icon={<DeleteOutlined />}>Delete</Button>
+          <Button loading={isMutatingStatus} onClick={handleActivateBatch} icon={<CheckCircleOutlined />}>Activate</Button>
+          <Button loading={isMutatingStatus} onClick={handleDeactivateBatch} icon={<CloseCircleOutlined />}>Deactivate</Button>
         </Space>
       )}
       <Table
@@ -130,7 +192,7 @@ function EmployeeList() {
         rowSelection={{
           columnWidth: '50px',
           selectedRowKeys: checkedEmployees,
-          onChange: setCheckedEmployees,
+          onChange: handleCheckEmployees,
         }}
         size="middle"
         dataSource={dataSource}
